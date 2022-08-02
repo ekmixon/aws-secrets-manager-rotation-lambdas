@@ -58,18 +58,33 @@ def lambda_handler(event, context):
     # Make sure the version is staged correctly
     metadata = service_client.describe_secret(SecretId=arn)
     if "RotationEnabled" in metadata and not metadata['RotationEnabled']:
-        logger.error("Secret %s is not enabled for rotation" % arn)
-        raise ValueError("Secret %s is not enabled for rotation" % arn)
+        logger.error(f"Secret {arn} is not enabled for rotation")
+        raise ValueError(f"Secret {arn} is not enabled for rotation")
     versions = metadata['VersionIdsToStages']
     if token not in versions:
-        logger.error("Secret version %s has no stage for rotation of secret %s." % (token, arn))
-        raise ValueError("Secret version %s has no stage for rotation of secret %s." % (token, arn))
+        logger.error(
+            f"Secret version {token} has no stage for rotation of secret {arn}."
+        )
+
+        raise ValueError(
+            f"Secret version {token} has no stage for rotation of secret {arn}."
+        )
+
     if "AWSCURRENT" in versions[token]:
-        logger.info("Secret version %s already set as AWSCURRENT for secret %s." % (token, arn))
+        logger.info(
+            f"Secret version {token} already set as AWSCURRENT for secret {arn}."
+        )
+
         return
     elif "AWSPENDING" not in versions[token]:
-        logger.error("Secret version %s not set as AWSPENDING for rotation of secret %s." % (token, arn))
-        raise ValueError("Secret version %s not set as AWSPENDING for rotation of secret %s." % (token, arn))
+        logger.error(
+            f"Secret version {token} not set as AWSPENDING for rotation of secret {arn}."
+        )
+
+        raise ValueError(
+            f"Secret version {token} not set as AWSPENDING for rotation of secret {arn}."
+        )
+
 
     # Call the appropriate step
     if step == "createSecret":
@@ -85,8 +100,8 @@ def lambda_handler(event, context):
         finish_secret(service_client, arn, token)
 
     else:
-        logger.error("lambda_handler: Invalid step parameter %s for secret %s" % (step, arn))
-        raise ValueError("Invalid step parameter %s for secret %s" % (step, arn))
+        logger.error(f"lambda_handler: Invalid step parameter {step} for secret {arn}")
+        raise ValueError(f"Invalid step parameter {step} for secret {arn}")
 
 
 def create_secret(service_client, arn, token):
@@ -114,7 +129,7 @@ def create_secret(service_client, arn, token):
     # Now try to get the secret version, if that fails, put a new secret
     try:
         get_secret_dict(service_client, arn, "AWSPENDING", token)
-        logger.info("createSecret: Successfully retrieved secret for %s." % arn)
+        logger.info(f"createSecret: Successfully retrieved secret for {arn}.")
     except service_client.exceptions.ResourceNotFoundException:
         # Get the alternate username swapping between the original user and the user with _clone appended to it
         current_dict['username'] = get_alt_username(current_dict['username'])
@@ -127,7 +142,9 @@ def create_secret(service_client, arn, token):
 
         # Put the secret
         service_client.put_secret_value(SecretId=arn, ClientRequestToken=token, SecretString=json.dumps(current_dict), VersionStages=['AWSPENDING'])
-        logger.info("createSecret: Successfully put secret for ARN %s and version %s." % (arn, token))
+        logger.info(
+            f"createSecret: Successfully put secret for ARN {arn} and version {token}."
+        )
 
 
 def set_secret(service_client, arn, token):
@@ -160,25 +177,46 @@ def set_secret(service_client, arn, token):
     conn = get_connection(pending_dict)
     if conn:
         conn.close()
-        logger.info("setSecret: AWSPENDING secret is already set as password in PostgreSQL DB for secret arn %s." % arn)
+        logger.info(
+            f"setSecret: AWSPENDING secret is already set as password in PostgreSQL DB for secret arn {arn}."
+        )
+
         return
 
     # Make sure the user from current and pending match
     if get_alt_username(current_dict['username']) != pending_dict['username']:
-        logger.error("setSecret: Attempting to modify user %s other than current user clone %s" % (pending_dict['username'], get_alt_username(current_dict['username'])))
-        raise ValueError("Attempting to modify user %s other than current user clone %s" % (pending_dict['username'], get_alt_username(current_dict['username'])))
+        logger.error(
+            f"setSecret: Attempting to modify user {pending_dict['username']} other than current user clone {get_alt_username(current_dict['username'])}"
+        )
+
+        raise ValueError(
+            f"Attempting to modify user {pending_dict['username']} other than current user clone {get_alt_username(current_dict['username'])}"
+        )
+
 
     # Make sure the host from current and pending match
     if current_dict['host'] != pending_dict['host']:
-        logger.error("setSecret: Attempting to modify user for host %s other than current host %s" % (pending_dict['host'], current_dict['host']))
-        raise ValueError("Attempting to modify user for host %s other than current host %s" % (pending_dict['host'], current_dict['host']))
+        logger.error(
+            f"setSecret: Attempting to modify user for host {pending_dict['host']} other than current host {current_dict['host']}"
+        )
+
+        raise ValueError(
+            f"Attempting to modify user for host {pending_dict['host']} other than current host {current_dict['host']}"
+        )
+
 
     # Before we do anything with the secret, make sure the AWSCURRENT secret is valid by logging in to the db
     # This ensures that the credential we are rotating is valid to protect against a confused deputy attack
     conn = get_connection(current_dict)
     if not conn:
-        logger.error("setSecret: Unable to log into database using current credentials for secret %s" % arn)
-        raise ValueError("Unable to log into database using current credentials for secret %s" % arn)
+        logger.error(
+            f"setSecret: Unable to log into database using current credentials for secret {arn}"
+        )
+
+        raise ValueError(
+            f"Unable to log into database using current credentials for secret {arn}"
+        )
+
     conn.close()
 
     # Now get the master arn from the current secret
@@ -186,14 +224,26 @@ def set_secret(service_client, arn, token):
     master_dict = get_secret_dict(service_client, master_arn, "AWSCURRENT")
     if current_dict['host'] != master_dict['host'] and not is_rds_replica_database(current_dict, master_dict):
         # If current dict is a replica of the master dict, can proceed
-        logger.error("setSecret: Current database host %s is not the same host as/rds replica of master %s" % (current_dict['host'], master_dict['host']))
-        raise ValueError("Current database host %s is not the same host as/rds replica of master %s" % (current_dict['host'], master_dict['host']))
+        logger.error(
+            f"setSecret: Current database host {current_dict['host']} is not the same host as/rds replica of master {master_dict['host']}"
+        )
+
+        raise ValueError(
+            f"Current database host {current_dict['host']} is not the same host as/rds replica of master {master_dict['host']}"
+        )
+
 
     # Now log into the database with the master credentials
     conn = get_connection(master_dict)
     if not conn:
-        logger.error("setSecret: Unable to log into database using credentials in master secret %s" % master_arn)
-        raise ValueError("Unable to log into database using credentials in master secret %s" % master_arn)
+        logger.error(
+            f"setSecret: Unable to log into database using credentials in master secret {master_arn}"
+        )
+
+        raise ValueError(
+            f"Unable to log into database using credentials in master secret {master_arn}"
+        )
+
 
     # Now set the password to the pending password
     try:
@@ -208,15 +258,22 @@ def set_secret(service_client, arn, token):
             # If the user exists, just update the password
             cur.execute("SELECT 1 FROM pg_roles where rolname = %s", (pending_dict['username'],))
             if len(cur.fetchall()) == 0:
-                create_role = "CREATE ROLE %s" % pending_username
-                cur.execute(create_role + " WITH LOGIN PASSWORD %s", (pending_dict['password'],))
-                cur.execute("GRANT %s TO %s" % (current_username, pending_username))
+                create_role = f"CREATE ROLE {pending_username}"
+                cur.execute(
+                    f"{create_role} WITH LOGIN PASSWORD %s",
+                    (pending_dict['password'],),
+                )
+
+                cur.execute(f"GRANT {current_username} TO {pending_username}")
             else:
-                alter_role = "ALTER USER %s" % pending_username
-                cur.execute(alter_role + " WITH PASSWORD %s", (pending_dict['password'],))
+                alter_role = f"ALTER USER {pending_username}"
+                cur.execute(f"{alter_role} WITH PASSWORD %s", (pending_dict['password'],))
 
             conn.commit()
-            logger.info("setSecret: Successfully created user %s in PostgreSQL DB for secret arn %s." % (pending_dict['username'], arn))
+            logger.info(
+                f"setSecret: Successfully created user {pending_dict['username']} in PostgreSQL DB for secret arn {arn}."
+            )
+
     finally:
         conn.close()
 
@@ -242,9 +299,9 @@ def test_secret(service_client, arn, token):
         KeyError: If the secret json does not contain the expected keys
 
     """
-    # Try to login with the pending secret, if it succeeds, return
-    conn = get_connection(get_secret_dict(service_client, arn, "AWSPENDING", token))
-    if conn:
+    if conn := get_connection(
+        get_secret_dict(service_client, arn, "AWSPENDING", token)
+    ):
         # This is where the lambda will validate the user's permissions. Uncomment/modify the below lines to
         # tailor these validations to your needs
         try:
@@ -254,11 +311,19 @@ def test_secret(service_client, arn, token):
         finally:
             conn.close()
 
-        logger.info("testSecret: Successfully signed into PostgreSQL DB with AWSPENDING secret in %s." % arn)
+        logger.info(
+            f"testSecret: Successfully signed into PostgreSQL DB with AWSPENDING secret in {arn}."
+        )
+
         return
     else:
-        logger.error("testSecret: Unable to log into database with pending secret of secret ARN %s" % arn)
-        raise ValueError("Unable to log into database with pending secret of secret ARN %s" % arn)
+        logger.error(
+            f"testSecret: Unable to log into database with pending secret of secret ARN {arn}"
+        )
+
+        raise ValueError(
+            f"Unable to log into database with pending secret of secret ARN {arn}"
+        )
 
 
 def finish_secret(service_client, arn, token):
@@ -284,14 +349,19 @@ def finish_secret(service_client, arn, token):
         if "AWSCURRENT" in metadata["VersionIdsToStages"][version]:
             if version == token:
                 # The correct version is already marked as current, return
-                logger.info("finishSecret: Version %s already marked as AWSCURRENT for %s" % (version, arn))
+                logger.info(
+                    f"finishSecret: Version {version} already marked as AWSCURRENT for {arn}"
+                )
+
                 return
             current_version = version
             break
 
     # Finalize by staging the secret version current
     service_client.update_secret_version_stage(SecretId=arn, VersionStage="AWSCURRENT", MoveToVersionId=token, RemoveFromVersionId=current_version)
-    logger.info("finishSecret: Successfully set AWSCURRENT stage to version %s for secret %s." % (token, arn))
+    logger.info(
+        f"finishSecret: Successfully set AWSCURRENT stage to version {token} for secret {arn}."
+    )
 
 
 def get_connection(secret_dict):
@@ -316,8 +386,15 @@ def get_connection(secret_dict):
 
     # Try to obtain a connection to the db
     try:
-        conn = pgdb.connect(host=secret_dict['host'], user=secret_dict['username'], password=secret_dict['password'], database=dbname, port=port, connect_timeout=5)
-        return conn
+        return pgdb.connect(
+            host=secret_dict['host'],
+            user=secret_dict['username'],
+            password=secret_dict['password'],
+            database=dbname,
+            port=port,
+            connect_timeout=5,
+        )
+
     except pg.InternalError:
         return None
 
@@ -362,7 +439,7 @@ def get_secret_dict(service_client, arn, stage, token=None):
         raise KeyError("Database engine must be set to 'postgres' in order to use this rotation lambda")
     for field in required_fields:
         if field not in secret_dict:
-            raise KeyError("%s key is missing from secret JSON" % field)
+            raise KeyError(f"{field} key is missing from secret JSON")
 
     # Parse and return the secret JSON string
     return secret_dict
@@ -386,11 +463,10 @@ def get_alt_username(current_username):
     clone_suffix = "_clone"
     if current_username.endswith(clone_suffix):
         return current_username[:(len(clone_suffix) * -1)]
-    else:
-        new_username = current_username + clone_suffix
-        if len(new_username) > 63:
-            raise ValueError("Unable to clone user, username length with _clone appended would exceed 63 characters")
-        return new_username
+    new_username = current_username + clone_suffix
+    if len(new_username) > 63:
+        raise ValueError("Unable to clone user, username length with _clone appended would exceed 63 characters")
+    return new_username
 
 def is_rds_replica_database(replica_dict, master_dict):
     """Validates that the database of a secret is a replica of the database of the master secret
@@ -418,13 +494,16 @@ def is_rds_replica_database(replica_dict, master_dict):
     try:
         describe_response = rds_client.describe_db_instances(DBInstanceIdentifier=replica_instance_id)
     except Exception as err:
-        logger.warn("Encountered error while verifying rds replica status: %s" % err)
+        logger.warn(f"Encountered error while verifying rds replica status: {err}")
         return False
     instances = describe_response['DBInstances']
 
     # Host from current secret cannot be found
     if not instances:
-        logger.info("Cannot verify replica status - no RDS instance found with identifier: %s" % replica_instance_id)
+        logger.info(
+            f"Cannot verify replica status - no RDS instance found with identifier: {replica_instance_id}"
+        )
+
         return False
 
     # DB Instance identifiers are unique - can only be one result
